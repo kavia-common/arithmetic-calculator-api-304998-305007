@@ -51,4 +51,45 @@ public class PercentController {
 
         return ResponseEntity.ok(Map.of("result", result));
     }
+
+    // PUBLIC_INTERFACE
+    @GetMapping("/modulo")
+    @Operation(
+            summary = "Compute a modulo b",
+            description = "Computes result = a % b. Accepts decimal numbers via query parameters a and b. "
+                    + "Returns 400 if inputs are missing/invalid or if b = 0."
+    )
+    public ResponseEntity<?> modulo(
+            @Parameter(description = "Dividend", required = true, example = "10")
+            @RequestParam(name = "a", required = false) String aRaw,
+            @Parameter(description = "Divisor (must be non-zero)", required = true, example = "3")
+            @RequestParam(name = "b", required = false) String bRaw
+    ) {
+        // Validation rules:
+        // - Missing a or b => 400 { "error": "Invalid input" }
+        // - Non-numeric a or b => 400 { "error": "Invalid input" }
+        // - b == 0 => 400 { "error": "Division by zero" }
+        if (aRaw == null || bRaw == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid input"));
+        }
+
+        final BigDecimal a;
+        final BigDecimal b;
+        try {
+            a = new BigDecimal(aRaw.trim());
+            b = new BigDecimal(bRaw.trim());
+        } catch (RuntimeException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid input"));
+        }
+
+        if (b.compareTo(BigDecimal.ZERO) == 0) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Division by zero"));
+        }
+
+        // BigDecimal#remainder gives the IEEE 754-style remainder for decimals.
+        // Example: 10 % 3 = 1, and it supports decimal inputs (e.g., 10.5 % 3 = 1.5).
+        BigDecimal result = a.remainder(b, DEFAULT_MATH_CONTEXT);
+
+        return ResponseEntity.ok(Map.of("result", result));
+    }
 }
