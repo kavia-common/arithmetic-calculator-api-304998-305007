@@ -4,19 +4,19 @@ import os
 import datetime
 from dotenv import load_dotenv
 
-# Cargar variables de entorno
+# Load environment variables
 load_dotenv()
 
-# ========== CONFIGURACIÓN ==========
+# ========== CONFIGURATION ==========
 REMOTE_HOST = "54.189.2.248"
 REMOTE_USER = "ubuntu"
 HOST_STRING = f"{REMOTE_USER}@{REMOTE_HOST}"
 
 REMOTE_WORK_DIR = "/home/ubuntu/spring_app_build"
-# Guardamos log en el HOME para evitar conflictos de rutas
+# Store log in HOME to avoid path conflicts during cleanup
 REMOTE_LOG_FILE = "build_output.log" 
 
-# --- Configuración de Logs Locales ---
+# --- Local Log Configuration ---
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCAL_LOG_PATH = os.path.join(CURRENT_DIR, "logs")
 os.makedirs(LOCAL_LOG_PATH, exist_ok=True)
@@ -25,102 +25,97 @@ os.makedirs(LOCAL_LOG_PATH, exist_ok=True)
 @task
 def build(c):
     """
-    Si el repo existe: hace git pull.
-    Si no existe: hace git clone.
-    Luego entra dinámicamente a la carpeta del proyecto y compila.
+    If the repo exists: performs git pull.
+    If it does not exist: performs git clone.
+    Then dynamically enters the project folder and runs the build.
     """
-    print("🔎 Validando configuración...")
+    print("🔎 Validating configuration...")
     
     ssh_pass = os.environ.get("SSH_PASSWORD", "").strip()
     if not ssh_pass:
-        print("❌ ERROR: SSH_PASSWORD no encontrada en .env")
+        print("❌ ERROR: SSH_PASSWORD not found in .env file")
         return
 
-    # 1. Detectar info local
+    # 1. Detect local Git info
     try:
         current_branch = local('git rev-parse --abbrev-ref HEAD', hide=True).stdout.strip()
         repo_url = local('git remote get-url origin', hide=True).stdout.strip()
-        print(f"   Rama detectada: {current_branch}")
+        print(f"   Detected branch: {current_branch}")
         print(f"   Repo URL: {repo_url}")
     except UnexpectedExit:
-        print("❌ Error: Ejecuta esto desde un repo Git.")
+        print("❌ Error: Run this from a Git repository.")
         return
 
-    # 2. Conexión
-    print(f"🔌 Conectando a {HOST_STRING}...")
+    # 2. Connection
+    print(f"🔌 Connecting to {HOST_STRING}...")
     conn = Connection(HOST_STRING, connect_kwargs={"password": ssh_pass})
 
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     local_log_file = os.path.join(LOCAL_LOG_PATH, f"build_{current_branch}_{timestamp}.log")
 
     try:
-        print(f"🚀 Iniciando operación en: {REMOTE_WORK_DIR}")
+        print(f"🚀 Starting operation in: {REMOTE_WORK_DIR}")
         
-        # --- LÓGICA INTELIGENTE EN BASH ---
-        # Usamos comillas triples f-string para escribir el script de bash legiblemente
+        # --- BASH SCRIPT LOGIC ---
         remote_script = f"""
-        # 1. Decidir si Clonar o Actualizar
+        # 1. Decide whether to Clone or Update
         if [ -d "{REMOTE_WORK_DIR}/.git" ]; then
-            echo "🔄 El repositorio ya existe. Actualizando rama '{current_branch}'..."
+            echo "🔄 Repository exists. Updating branch '{current_branch}'..."
             cd {REMOTE_WORK_DIR}
             
-            # Aseguramos que tenemos los últimos cambios del remoto
+            # Ensure we have the latest remote changes
             git fetch origin
             
-            # Forzamos el checkout a la rama deseada (creándola si no existe localmente)
+            # Force checkout to the desired branch (creating it if it doesn't exist)
             git checkout {current_branch} || git checkout -b {current_branch} origin/{current_branch}
             
-            # Traemos los cambios
+            # Pull changes
             git pull origin {current_branch}
         else
-            echo "🆕 El repositorio no existe. Clonando rama '{current_branch}'..."
+            echo "🆕 Repository does not exist. Cloning branch '{current_branch}'..."
             mkdir -p {REMOTE_WORK_DIR}
             cd {REMOTE_WORK_DIR}
             git clone -b {current_branch} {repo_url} .
         fi
 
-        # 2. Entrar a la sub-carpeta dinámica (donde está el gradlew)
-        # Nos aseguramos de estar en la raíz del repo primero
+        # 2. Enter dynamic sub-folder (where gradlew resides)
+        # Ensure we are at the repo root first
         cd {REMOTE_WORK_DIR}
         
-        # Buscamos el primer directorio visible
+        # Find the first visible directory
         PROJECT_DIR=$(ls -d */ | head -n 1)
         
         if [ -z "$PROJECT_DIR" ]; then
-            echo "❌ Error: No se encontró la carpeta del proyecto dentro del repo."
+            echo "❌ Error: Project folder not found inside repo."
             exit 1
         fi
 
         cd "$PROJECT_DIR"
-        echo "📂 Entrando a directorio del proyecto: $(pwd)"
+        echo "📂 Entering project directory: $(pwd)"
 
-        # 3. Ejecutar Build
+        # 3. Execute Build
         chmod +x gradlew
         ./gradlew build
         """
 
-        # Colapsamos los saltos de línea para enviarlo como una sola instrucción larga,
-        # pero mantenemos los puntos y coma necesarios.
-        # (Fabric maneja bien los scripts multilinea si no son muy complejos, 
-        # pero es más seguro envolverlo todo para el 'tee')
-        
+        # Wrap everything to capture logs with 'tee'
         full_command = f"({remote_script}) 2>&1 | tee ~/{REMOTE_LOG_FILE}"
 
-        print("⏳ Ejecutando sincronización y build...")
+        print("⏳ Executing synchronization and build...")
         conn.run(full_command, pty=True)
 
-        print("\n⬇️ Descargando logs...")
+        print("\n⬇️ Downloading logs...")
         conn.get(f"/home/{REMOTE_USER}/{REMOTE_LOG_FILE}", local_log_file)
-        print(f"✅ Log guardado en: {local_log_file}")
+        print(f"✅ Log saved to: {local_log_file}")
 
     except UnexpectedExit:
-        print(f"\n❌ El build falló. Recuperando logs...")
+        print(f"\n❌ Build failed. Retrieving logs...")
         try:
             conn.get(f"/home/{REMOTE_USER}/{REMOTE_LOG_FILE}", local_log_file)
-            print(f"⚠️ Log de error guardado en: {local_log_file}")
+            print(f"⚠️ Error log saved to: {local_log_file}")
         except:
-            print("No se pudo recuperar el log remoto.")
+            print("Could not retrieve remote log.")
             
     finally:
         conn.close()
-        print("🔌 Conexión cerrada.")
+        print("🔌 Connection closed.")
