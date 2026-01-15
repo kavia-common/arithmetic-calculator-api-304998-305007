@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ========== CONFIGURATION ==========
-REMOTE_HOST = "54.189.2.248"
+REMOTE_HOST = "34.217.122.52"
 REMOTE_USER = "ubuntu"
 HOST_STRING = f"{REMOTE_USER}@{REMOTE_HOST}"
 
