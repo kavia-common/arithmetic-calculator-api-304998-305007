@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ========== CONFIGURATION ==========
-REMOTE_HOST = "34.217.122.52"
+REMOTE_HOST = "44.251.206.156"
 REMOTE_USER = "ubuntu"
 HOST_STRING = f"{REMOTE_USER}@{REMOTE_HOST}"
 
@@ -95,7 +95,7 @@ def build(c):
 
         # 3. Execute Build
         chmod +x gradlew
-        ./gradlew build
+        ./gradlew build --no-daemon -Dorg.gradle.jvmargs=-Xmx512m
         """
 
         # Wrap everything to capture logs with 'tee'
